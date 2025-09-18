@@ -1,0 +1,154 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { getPublicFundingContract } from '@/lib/publicFundingContract';
+import { useSBT } from './useSBT';
+import { debounce } from 'lodash';
+
+// Cache for roles to prevent unnecessary contract calls
+const rolesCache = new Map();
+
+export function useWallet() {
+  const [account, setAccount] = useState<string>('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthority, setIsAuthority] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
+  
+  // Get SBT status using the new hook
+  const { isRegistered: isSBTHolder, hasApplied: hasSBTApplication } = useSBT(account);
+  
+  const connectWalletManually = async () => {
+    setIsConnecting(true);
+    
+    try {
+      if (typeof window === 'undefined' || typeof window.ethereum === 'undefined') {
+        console.log("MetaMask not detected");
+        alert("MetaMask is not installed. Please install MetaMask to connect your wallet.");
+        setIsConnecting(false);
+        return;
+      }
+
+      console.log("Requesting accounts...");
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      console.log("Received accounts:", accounts);
+      
+      if (accounts.length > 0) {
+        setAccount(accounts[0]);
+        await checkRoles(accounts[0]);
+      }
+    } catch (err) {
+      console.error("Error connecting to wallet:", err);
+      if (err.code === 4001) {
+        alert("Connection rejected. Please connect to MetaMask.");
+      } else {
+        alert(`Error connecting wallet: ${err.message || err}`);
+      }
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const checkRoles = useCallback(async (address: string) => {
+    if (!address) return;
+
+    // Check cache first
+    const cacheKey = `${address}-roles`;
+    const cachedRoles = rolesCache.get(cacheKey);
+    if (cachedRoles) {
+      setIsAdmin(cachedRoles.isAdmin);
+      setIsAuthority(cachedRoles.isAuthority);
+      return;
+    }
+
+    try {
+      const contract = await getPublicFundingContract();
+      const adminAddress = await contract.admin();
+      const isAuth = await contract.authorities(address);
+
+      const roles = {
+        isAdmin: adminAddress.toLowerCase() === address.toLowerCase(),
+        isAuthority: isAuth
+      };
+
+      // Cache the roles for 5 minutes
+      rolesCache.set(cacheKey, roles);
+      setTimeout(() => rolesCache.delete(cacheKey), 5 * 60 * 1000);
+
+      setIsAdmin(roles.isAdmin);
+      setIsAuthority(roles.isAuthority);
+    } catch (err) {
+      console.error("Error checking roles:", err);
+    }
+  }, []);
+
+  // Debounce the roles check to prevent too many calls
+  const debouncedCheckRoles = useCallback(
+    debounce((address: string) => checkRoles(address), 1000),
+    [checkRoles]
+  );
+
+  useEffect(() => {
+    const connectWallet = async () => {
+      setIsConnecting(true);
+      
+      if (typeof window === 'undefined' || typeof window.ethereum === 'undefined') {
+        console.log("MetaMask not detected");
+        setIsConnecting(false);
+        return;
+      }
+
+      try {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          await checkRoles(accounts[0]);
+        }
+      } catch (err) {
+        console.error("Error connecting to wallet:", err);
+      } finally {
+        setIsConnecting(false);
+      }
+    };
+
+    connectWallet();
+
+    if (typeof window !== 'undefined' && window.ethereum) {
+      const handleAccountsChanged = (accounts: string[]) => {
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          debouncedCheckRoles(accounts[0]);
+        } else {
+          setAccount('');
+          setIsAdmin(false);
+          setIsAuthority(false);
+        }
+      };
+
+      const handleChainChanged = () => {
+        // Clear caches on chain change
+        rolesCache.clear();
+        // Reload the page when chain changes
+        window.location.reload();
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+
+      return () => {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+        debouncedCheckRoles.cancel();
+      };
+    }
+  }, [checkRoles, debouncedCheckRoles]);
+
+  return { 
+    account, 
+    isAdmin, 
+    isAuthority, 
+    isConnecting,
+    isSBTHolder,
+    hasSBTApplication,
+    connectWallet: connectWalletManually
+  };
+}
