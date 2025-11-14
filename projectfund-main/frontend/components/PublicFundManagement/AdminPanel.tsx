@@ -23,39 +23,32 @@ export function AdminPanel({ showNotification, onError }: AdminPanelProps) {
   const [loadingApplications, setLoadingApplications] = useState(false);
   const [processingApproval, setProcessingApproval] = useState<string | null>(null);
 
-  // Fetch pending applications
+  // Fetch pending applications from Django API
   const fetchPendingApplications = async () => {
     try {
       setLoadingApplications(true);
-      const sbtContract = await getSBTContract();
       
-      // Get applicant count
-      const applicantCount = await sbtContract.getApplicantCount();
-      const count = Number(applicantCount);
+      // Use Django API endpoint instead of direct blockchain calls
+      const response = await fetch('http://localhost:8000/api/admin/panel/?action=sbt_applications');
       
-      const applications: PendingApplication[] = [];
-      
-      // Fetch each applicant
-      for (let i = 0; i < count; i++) {
-        try {
-          const applicantAddress = await sbtContract.getApplicantByIndex(i);
-          const applicationHash = await sbtContract.applications(applicantAddress);
-          
-          if (applicationHash !== ethers.ZeroHash) {
-            applications.push({
-              address: applicantAddress,
-              applicationHash: applicationHash
-            });
-          }
-        } catch (err) {
-          console.error(`Error fetching applicant at index ${i}:`, err);
-        }
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
       }
+      
+      const data = await response.json();
+      
+      // Transform API data to match component interface
+      const applications: PendingApplication[] = data
+        .filter((app: any) => app.has_applied && !app.is_registered)
+        .map((app: any) => ({
+          address: app.address,
+          applicationHash: app.voter_hash
+        }));
       
       setPendingApplications(applications);
     } catch (err) {
       console.error("Error fetching pending applications:", err);
-      onError("Failed to load pending applications");
+      onError("Failed to load pending applications - make sure backend is running");
     } finally {
       setLoadingApplications(false);
     }
@@ -65,21 +58,51 @@ export function AdminPanel({ showNotification, onError }: AdminPanelProps) {
     fetchPendingApplications();
   }, []);
 
+  const seedTestApplications = async () => {
+    try {
+      const sbtContract = await getSBTContract();
+      if (typeof sbtContract.createTestApplications === 'function') {
+        sbtContract.createTestApplications();
+        showNotification('Seeded test applications (mock)');
+        // Refresh list after seeding
+        setTimeout(() => fetchPendingApplications(), 300);
+      } else {
+        onError('Seed function not available on the connected contract');
+      }
+    } catch (err) {
+      console.error('Error seeding test applications:', err);
+      onError('Failed to seed test applications.');
+    }
+  };
+
   const approveApplication = async (applicantAddress: string) => {
     try {
       setProcessingApproval(applicantAddress);
       
-      // Generate a random nullifier (in a real application, this would be more complex)
-      const nullifier = Math.floor(Math.random() * 1000000);
+      // Use Django API to approve application
+      const response = await fetch('http://localhost:8000/api/admin/panel/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'approve_sbt',
+          applicant_address: applicantAddress,
+          nullifier: 1, // Default nullifier value
+          // Admin address would ideally come from wallet context
+          admin_address: applicantAddress // This should be replaced with actual admin address
+        })
+      });
       
-      const sbtContract = await getSBTContract();
-      const tx = await sbtContract.approveApplication(applicantAddress, nullifier);
-      await tx.wait();
+      const data = await response.json();
       
-      showNotification(`Successfully approved application for ${applicantAddress}`);
-      
-      // Refresh the applications list
-      fetchPendingApplications();
+      if (data.success) {
+        showNotification(`Successfully approved application for ${applicantAddress}`);
+        // Refresh the applications list
+        fetchPendingApplications();
+      } else {
+        throw new Error(data.error || 'Failed to approve application');
+      }
     } catch (err) {
       console.error("Error approving application:", err);
       onError("Failed to approve application. " + (err as Error).message);
@@ -222,15 +245,26 @@ export function AdminPanel({ showNotification, onError }: AdminPanelProps) {
       <div className="bg-white p-6 rounded-lg shadow mb-8">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-xl font-semibold">Pending SBT Applications</h3>
-          <button 
-            onClick={fetchPendingApplications}
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 flex items-center"
-          >
+          <div className="flex items-center space-x-2">
+            <button 
+              onClick={fetchPendingApplications}
+              className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 flex items-center"
+            >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
           </button>
+            <button
+              onClick={seedTestApplications}
+              className="px-3 py-1 bg-yellow-200 text-yellow-800 rounded hover:bg-yellow-300 flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h4l3 7 4-16 3 7h4" />
+              </svg>
+              Seed Mock
+            </button>
+          </div>
         </div>
 
         {loadingApplications ? (

@@ -1,12 +1,21 @@
 import os
 import tempfile
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
-from langchain_groq import ChatGroq
-from langchain.prompts import PromptTemplate
+try:
+    from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.vectorstores import FAISS
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_groq import ChatGroq
+    from langchain.prompts import PromptTemplate
+    # Try importing RetrievalQA from new location
+    try:
+        from langchain.chains.retrieval_qa.base import RetrievalQA
+    except ImportError:
+        from langchain.chains import RetrievalQA
+except ImportError as e:
+    print(f"Warning: Some langchain modules not available: {e}")
+    # Provide mock for non-critical functionality
+    RetrievalQA = None
 from dotenv import load_dotenv
 import warnings
 

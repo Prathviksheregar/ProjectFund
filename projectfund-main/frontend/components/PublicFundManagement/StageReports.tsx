@@ -94,88 +94,98 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
   
       setIsUploading(true);
       
-      // 1. First, upload to IPFS
-      setUploadStage('ipfs');
+      // 1. First, analyze with AI (replacing Pinata IPFS)
+      setUploadStage('ipfs'); // Still using 'ipfs' stage name for progress display
+      showNotification("Your stage report is being analyzed by AI...");
+      
       const formData = new FormData();
       formData.append('file', stageReportFile);
+      formData.append('proposal_id', selectedProposalForReport.toString());
+      formData.append('stage_number', selectedStageForReport.toString());
       
-      const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          pinata_api_key: "449f8e2d82e11b754f29",
-          pinata_secret_api_key: "8e6da3c908a4d317fe4686b7db62842d88e03b11284734a7f1ae86e8c1f03abe",
-        },
-      });
+      // Call our backend API for AI analysis (replaces Pinata)
+      const aiAnalysisResponse = await axios.post(
+        'http://localhost:8000/api/stage-report/analyze/',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
       
-      const uploadedIpfsCid = response.data.IpfsHash;
-      setIpfsCid(uploadedIpfsCid);
-      showNotification("File uploaded to IPFS successfully");
+      if (!aiAnalysisResponse.data.success) {
+        throw new Error("AI analysis failed: " + aiAnalysisResponse.data.error);
+      }
       
-      // 2. Submit CID to blockchain
+      const analysisData = aiAnalysisResponse.data.analysis;
+      const fileHash = aiAnalysisResponse.data.file_hash;
+      
+      setIpfsCid(fileHash); // Store hash for display
+      
+      // Check if AI verification passed
+      if (!aiAnalysisResponse.data.verified) {
+        showNotification(`AI Analysis Complete: Document flagged for manual review. Confidence: ${aiAnalysisResponse.data.confidence}%`);
+        setAiReviewStatus(`FLAGGED - Confidence: ${aiAnalysisResponse.data.confidence}%`);
+        setAiReviewLoading(false);
+        setIsUploading(false);
+        setUploadStage('idle');
+        return;
+      }
+      
+      showNotification(`AI Analysis Complete: Document verified (${aiAnalysisResponse.data.confidence}% confidence). Proceeding to blockchain submission...`);
+      
+      // 2. Submit file hash and AI result to blockchain
       setUploadStage('blockchain');
       
       const contract = await getPublicFundingContract();
       const tx = await contract.submitStageReport(
         selectedProposalForReport,
         selectedStageForReport,
-        uploadedIpfsCid
+        fileHash  // Submit the file hash instead of IPFS CID
       );
       await tx.wait();
       
-      showNotification(`Report CID submitted to blockchain for proposal #${selectedProposalForReport} stage #${selectedStageForReport}`);
+      showNotification(`Report submitted to blockchain for proposal #${selectedProposalForReport} stage #${selectedStageForReport}`);
       
-      // 3. Then send to AI for review
-      setUploadStage('ai-review');
-      setAiReviewLoading(true);
-      showNotification("Your document is being reviewed by our AI agent...");
+      // 3. Check if stage needs to be released
+      setUploadStage('completing');
       
-      const aiFormData = new FormData();
-      aiFormData.append('file', stageReportFile);
+      const currentStageInfo = await getStageInfo(selectedProposalForReport, selectedStageForReport);
       
-      try {
-        const aiResponse = await axios.post('http://192.168.137.89:8000/analyze/', aiFormData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+      // Only release if stage is in NotStarted state
+      if (currentStageInfo && currentStageInfo.state === 'NotStarted') {
+        const releaseStageAmount = async (proposalId: number) => {
+          const wallet = new ethers.Wallet('ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', new ethers.JsonRpcProvider('http://127.0.0.1:8545'));
+          const contractWithSigner = (await getPublicFundingContract()).connect(wallet);
+          const releaseTx = await (contractWithSigner as any).releaseStageAmount(proposalId);
+          await releaseTx.wait();
+        };
         
-        setAiReviewStatus(aiResponse.data.status);
-        
-        // If not approved, stop the process
-        if (aiResponse.data.status !== "APPROVED") {
-          showNotification(`AI Review Result: ${aiResponse.data.status} - Document not approved. Stage will remain in progress.`);
-          setAiReviewLoading(false);
-          setIsUploading(false);
-          setUploadStage('idle');
-          return;
-        }
-        
-        // If approved, complete the stage and release funds
-        setUploadStage('completing');
-
-        // 4. Complete stage and Release funds for next stage
-        await proposalStageCompleted(selectedProposalForReport, selectedStageForReport);
-        
-        showNotification(`Report approved by AI. Stage completed and funds released for next step #${selectedProposalForReport}`);
-        
-      } catch (aiErr) {
-        console.error("Error during AI review:", aiErr);
-        onError("AI review failed. Document is on blockchain but stage remains in progress.");
-        setAiReviewLoading(false);
-        setIsUploading(false);
-        setUploadStage('idle');
-        return;
+        await releaseStageAmount(selectedProposalForReport);
+        showNotification(`Stage funds released for proposal #${selectedProposalForReport}`);
+      } else {
+        showNotification(`Stage already released, completing...`);
       }
-  
+      
+      // 4. Complete stage
+      await proposalStageCompleted(selectedProposalForReport, selectedStageForReport);
+      
+      showNotification(`✓ Stage completed! Proposal #${selectedProposalForReport} proceeding to next stage.`);
+      setAiReviewStatus("APPROVED");
+      
       // Reset state after all operations complete
       setStageReportFile(null);
       setSelectedProposalForReport(null);
       setSelectedStageForReport(null);
       setAiReviewStatus(null);
       setIpfsCid(null);
+      
     } catch (err) {
       console.error("Error submitting report:", err);
-      onError("Failed to submit report. " + (err as Error).message);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      onError("Failed to submit report. " + errorMessage);
+      setAiReviewLoading(false);
     } finally {
       setIsUploading(false);
       setUploadStage('idle');
@@ -265,10 +275,10 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               ) : null}
-              <span className="text-sm font-medium">IPFS Upload</span>
+              <span className="text-sm font-medium">AI Analysis</span>
             </div>
             {ipfsCid && uploadStage !== 'ipfs' && (
-              <span className="block text-xs mt-1 truncate">CID: {ipfsCid.substring(0, 8)}...</span>
+              <span className="block text-xs mt-1 truncate">Hash: {ipfsCid.substring(0, 8)}...</span>
             )}
           </div>
           
@@ -294,7 +304,7 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               ) : null}
-              <span className="text-sm font-medium">AI Review</span>
+              <span className="text-sm font-medium">Verification</span>
             </div>
             {aiReviewStatus && uploadStage === 'completing' && (
               <span className="block text-xs mt-1">{aiReviewStatus}</span>
@@ -306,7 +316,7 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
               {uploadStage === 'completing' ? (
                 <div className="h-4 w-4 rounded-full border-2 border-green-500 border-t-transparent animate-spin mr-2"></div>
               ) : null}
-              <span className="text-sm font-medium">Completing</span>
+              <span className="text-sm font-medium">Complete</span>
             </div>
           </div>
         </div>
@@ -401,7 +411,7 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <p className="text-sm text-blue-700">
-                      Your document will be uploaded to IPFS, then the CID will be stored on the blockchain. After blockchain confirmation, our AI will review the document. If approved, the stage will be completed and funds released.
+                      Your PDF report will be analyzed by our AI verification system for authenticity and validity. If approved, a hash will be stored on the blockchain and the stage will be completed, releasing funds for the next phase.
                     </p>
                   </div>
                 </div>

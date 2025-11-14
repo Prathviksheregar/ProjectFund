@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { getPublicFundingContract } from '@/lib/publicFundingContract';
 import { Proposal, ProposalState } from '@/lib/types';
@@ -45,6 +45,10 @@ export function useProposals() {
     ];
     return states[state];
   };
+
+  useEffect(() => {
+    loadProposals();
+  }, []);
 
   return { proposals, loadProposals };
 }

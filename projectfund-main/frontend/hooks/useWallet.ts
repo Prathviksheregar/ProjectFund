@@ -36,7 +36,7 @@ export function useWallet() {
         setAccount(accounts[0]);
         await checkRoles(accounts[0]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error connecting to wallet:", err);
       if (err.code === 4001) {
         alert("Connection rejected. Please connect to MetaMask.");
@@ -60,14 +60,23 @@ export function useWallet() {
       return;
     }
 
+  // Hardcoded admin address check for development (include extra dev admin)
+  const ADMIN_ADDRESS = '0x46F27CE202dFEa1d7eD6Cc9EA9d4f586352a8e31';
+  const EXTRA_ADMIN = '0x77a9880fc1637d02e988049c3057ddf9fa43119b';
+  const isHardcodedAdmin = address.toLowerCase() === ADMIN_ADDRESS.toLowerCase() || address.toLowerCase() === EXTRA_ADMIN.toLowerCase();
+
     try {
       const contract = await getPublicFundingContract();
       const adminAddress = await contract.admin();
       const isAuth = await contract.authorities(address);
 
+      // Treat the requested authority address as authority in dev (non-destructive)
+      const EXTRA_AUTHORITY = '0x8ffb13e194414c545870f8bd2feeedd1d47f5fec';
+      const isHardcodedAuthority = address.toLowerCase() === EXTRA_AUTHORITY.toLowerCase();
+
       const roles = {
-        isAdmin: adminAddress.toLowerCase() === address.toLowerCase(),
-        isAuthority: isAuth
+        isAdmin: isHardcodedAdmin || adminAddress.toLowerCase() === address.toLowerCase(),
+        isAuthority: Boolean(isAuth) || isHardcodedAuthority
       };
 
       // Cache the roles for 5 minutes
@@ -76,8 +85,15 @@ export function useWallet() {
 
       setIsAdmin(roles.isAdmin);
       setIsAuthority(roles.isAuthority);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error checking roles:", err);
+      // Fallback to hardcoded admin in case of contract error
+      const roles = {
+        isAdmin: isHardcodedAdmin,
+        isAuthority: false
+      };
+      setIsAdmin(roles.isAdmin);
+      setIsAuthority(roles.isAuthority);
     }
   }, []);
 
@@ -103,7 +119,7 @@ export function useWallet() {
           setAccount(accounts[0]);
           await checkRoles(accounts[0]);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error connecting to wallet:", err);
       } finally {
         setIsConnecting(false);

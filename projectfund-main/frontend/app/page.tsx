@@ -168,6 +168,24 @@ export default function Home() {
           </div>
         </div>
         
+        {/* SBT Application Call-to-Action */}
+        {isConnected && (
+          <div className="mt-16 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-2xl p-8 text-white">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold mb-4">Ready to Participate in Governance?</h2>
+              <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
+                Apply for your Soulbound Token (SBT) to become a verified voter and participate in public fund management decisions.
+              </p>
+              <Link href="/dashboard/fund-mangement">
+                <Button size="lg" variant="secondary" className="bg-white text-blue-600 hover:bg-gray-50">
+                  Apply for SBT Token
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Features section */}
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white/90 p-5 rounded-lg shadow-sm">
@@ -190,8 +208,8 @@ export default function Home() {
             <div className="inline-flex items-center justify-center p-2 bg-blue-100 rounded-lg mb-4">
               <CheckCircle className="h-6 w-6 text-blue-600" />
             </div>
-            <h3 className="text-lg font-bold mb-2">Community Governance</h3>
-            <p className="text-gray-600">Participate in proposal creation and decision-making processes.</p>
+            <h3 className="text-lg font-bold mb-2">SBT Token Application</h3>
+            <p className="text-gray-600">Apply for Soulbound Tokens to become a verified voter and participate in governance decisions.</p>
           </div>
         </div>
       </div>

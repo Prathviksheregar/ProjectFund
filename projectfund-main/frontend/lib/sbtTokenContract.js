@@ -1,5 +1,9 @@
 import { BrowserProvider, Contract } from 'ethers';
 
+// Local constants to avoid referencing ethers.* constants (keeps mock self-contained)
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const ZERO_HASH = '0x' + '0'.repeat(64);
+
 const contractABI =  [
     {
       "inputs": [],
@@ -650,35 +654,258 @@ const contractAddress = process.env.NEXT_PUBLIC_SBT_CONTRACT;
 let cachedContract = null;
 let mockContract = null;
 
+// Mock storage for persistent state across page reloads
+const MOCK_STORAGE_KEY = 'mockSBTData';
+const getMockStorage = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const setMockStorage = (data) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    console.warn('Could not save to localStorage:', error);
+  }
+};
+
 // Create a mock contract for development
 const createMockContract = async (signer) => {
   if (mockContract) return mockContract;
   
-  console.log("Creating mock SBT contract");
+  console.log("Creating mock SBT contract for development/testing");
   
-  // Mock contract implementation
+  // Admin address with automatic 1000 SBT tokens
+  const ADMIN_ADDRESS = '0x46F27CE202dFEa1d7eD6Cc9EA9d4f586352a8e31';
+  // Additional dev admin (non-destructive)
+  const EXTRA_ADMIN_ADDRESS = '0x77a9880fc1637d02e988049c3057ddf9fa43119b';
+  
+  // Initialize admin data if not exists
+  const initializeAdminData = () => {
+    const mockData = getMockStorage();
+    if (!mockData[ADMIN_ADDRESS]) {
+      mockData[ADMIN_ADDRESS] = {
+        hasApplied: true,
+        isRegistered: true,
+        tokenId: 1000, // Admin gets token ID 1000
+        nullifier: 999999,
+        voterHash: "0x" + "admin".padEnd(64, '0'),
+        applicationDate: new Date().toISOString(),
+        isAdmin: true
+      };
+      setMockStorage(mockData);
+      console.log("Admin address automatically configured with SBT tokens");
+    }
+    // Also seed the extra admin address if not present (non-destructive)
+    if (!mockData[EXTRA_ADMIN_ADDRESS]) {
+      mockData[EXTRA_ADMIN_ADDRESS] = {
+        hasApplied: true,
+        isRegistered: true,
+        tokenId: 1001, // Extra admin gets token ID 1001
+        nullifier: 999998,
+        voterHash: "0x" + "extraadmin".padEnd(64, '0'),
+        applicationDate: new Date().toISOString(),
+        isAdmin: true
+      };
+      setMockStorage(mockData);
+      console.log(`Extra admin ${EXTRA_ADMIN_ADDRESS} configured with SBT tokens`);
+    }
+  };
+  
+  // Initialize admin on contract creation
+  initializeAdminData();
+  
+  // Initialize a default authority in mock storage (non-destructive)
+  const initializeAuthorityData = () => {
+    const AUTH_ADDRESS = '0x8ffb13e194414c545870f8bd2feeedd1d47f5fec';
+    const mockData = getMockStorage();
+    const key = AUTH_ADDRESS;
+    if (!mockData[key]) mockData[key] = {};
+    // set authority flag without removing any existing fields
+    mockData[key].isAuthority = true;
+    mockData[key].authoritySince = mockData[key].authoritySince || new Date().toISOString();
+    setMockStorage(mockData);
+    console.log(`Initialized authority mock data for ${AUTH_ADDRESS}`);
+  };
+  initializeAuthorityData();
+  
+  // Create test applications for demo purposes
+  const createTestApplicationsIfNeeded = () => {
+    const mockData = getMockStorage();
+    const hasTestApps = Object.keys(mockData).some(addr => addr.startsWith('0x1234') || addr.startsWith('0xABCD'));
+    
+    if (!hasTestApps) {
+      const testAddresses = [
+        '0x1234567890123456789012345678901234567890',
+        '0xABCDEF1234567890ABCDEF1234567890ABCDEF12', 
+        '0x9876543210987654321098765432109876543210'
+      ];
+      
+      testAddresses.forEach((address, index) => {
+        mockData[address] = {
+          hasApplied: true,
+          isRegistered: false,
+          voterHash: "0x" + `test${index}`.padEnd(64, '0'),
+          applicationDate: new Date().toISOString()
+        };
+      });
+      
+      setMockStorage(mockData);
+      console.log("Created test SBT applications for admin to approve");
+    }
+  };
+  
+  createTestApplicationsIfNeeded();
+  
+  // Mock contract implementation with persistent storage
   mockContract = {
     name: async () => "Mock SBT Token",
     symbol: async () => "MSBT",
+    
     applyForSBT: async (voterHash) => {
       console.log("Mock applyForSBT called with hash:", voterHash);
+      
+      const signerAddress = await signer.getAddress();
+      const mockData = getMockStorage();
+      
+      // Store application data
+      if (!mockData[signerAddress]) {
+        mockData[signerAddress] = {};
+      }
+      
+      mockData[signerAddress].hasApplied = true;
+      mockData[signerAddress].voterHash = voterHash;
+      mockData[signerAddress].applicationDate = new Date().toISOString();
+      
+      setMockStorage(mockData);
+      
       // Simulate transaction
       return {
         hash: "0x" + Math.random().toString(16).substring(2, 38),
         wait: async () => {
-          console.log("Mock transaction confirmed");
+          console.log("Mock SBT application transaction confirmed");
           return { status: 1 };
         }
       };
     },
+    
     getApplicationStatus: async (address) => {
       console.log("Mock getApplicationStatus for:", address);
-      // Return mock status - has applied but not registered yet
-      return { hasApplied: true, isRegistered: false };
+      
+      // Always initialize admin data
+      initializeAdminData();
+      
+      const mockData = getMockStorage();
+      const userData = mockData[address] || {};
+      
+      return { 
+        hasApplied: userData.hasApplied || false, 
+        isRegistered: userData.isRegistered || false 
+      };
     },
+    
     isRegisteredVoter: async (address) => {
       console.log("Mock isRegisteredVoter for:", address);
-      return false;
+      
+      // Always initialize admin data
+      initializeAdminData();
+      
+      const mockData = getMockStorage();
+      const userData = mockData[address] || {};
+      return userData.isRegistered || false;
+    },
+    
+    getTokenIdByAddress: async (address) => {
+      console.log("Mock getTokenIdByAddress for:", address);
+      
+      // Always initialize admin data
+      initializeAdminData();
+      
+      const mockData = getMockStorage();
+      const userData = mockData[address] || {};
+      return userData.tokenId || 0;
+    },
+    
+    getApplicantCount: async () => {
+      const mockData = getMockStorage();
+      // Only count applications that haven't been approved yet
+      return Number(Object.values(mockData).filter(data => data.hasApplied && !data.isRegistered).length);
+    },
+    
+    getVoterCount: async () => {
+      const mockData = getMockStorage();
+      return Object.values(mockData).filter(data => data.isRegistered).length;
+    },
+    
+    getApplicantByIndex: async (index) => {
+      console.log("Mock getApplicantByIndex for index:", index);
+      const mockData = getMockStorage();
+      const applicants = Object.keys(mockData).filter(address => 
+        mockData[address].hasApplied && !mockData[address].isRegistered
+      );
+      const addr = applicants[Number(index)];
+      return addr ? String(addr) : ZERO_ADDRESS;
+    },
+    
+    applications: async (address) => {
+      console.log("Mock applications for:", address);
+      const mockData = getMockStorage();
+      const userData = mockData[address] || {};
+      if (userData.hasApplied && !userData.isRegistered) {
+        return userData.voterHash || "0x" + "pending".padEnd(64, '0');
+      }
+      return ZERO_HASH;
+    },
+    
+    // Admin function to approve applications (for testing)
+    approveApplication: async (applicantAddress, nullifier) => {
+      console.log("Mock approveApplication for:", applicantAddress);
+      const mockData = getMockStorage();
+      
+      if (mockData[applicantAddress] && mockData[applicantAddress].hasApplied) {
+        mockData[applicantAddress].isRegistered = true;
+        mockData[applicantAddress].tokenId = Date.now(); // Simple token ID
+        mockData[applicantAddress].nullifier = nullifier;
+        setMockStorage(mockData);
+        
+        return {
+          hash: "0x" + Math.random().toString(16).substring(2, 38),
+          wait: async () => {
+            console.log("Mock approval transaction confirmed");
+            return { status: 1 };
+          }
+        };
+      }
+      throw new Error("No application found for this address");
+    },
+    
+    // Helper function to create test applications for demo
+    createTestApplications: () => {
+      const mockData = getMockStorage();
+      const testAddresses = [
+        '0x1234567890123456789012345678901234567890',
+        '0xABCDEF1234567890ABCDEF1234567890ABCDEF12',
+        '0x9876543210987654321098765432109876543210'
+      ];
+      
+      testAddresses.forEach((address, index) => {
+        if (!mockData[address]) {
+          mockData[address] = {
+            hasApplied: true,
+            isRegistered: false,
+            voterHash: "0x" + `test${index}`.padEnd(64, '0'),
+            applicationDate: new Date().toISOString()
+          };
+        }
+      });
+      
+      setMockStorage(mockData);
+      console.log("Created test SBT applications for admin to approve");
     }
   };
   
@@ -760,8 +987,8 @@ const sbtStatusCache = new Map();
 export const checkSBTStatus = async (address) => {
   if (!address) return { hasApplied: false, isRegistered: false };
 
-  // Check cache first
-  const cacheKey = `${address}-${Date.now()}`;
+  // Use address as cache key and cache for 30 seconds
+  const cacheKey = String(address).toLowerCase();
   if (sbtStatusCache.has(cacheKey)) {
     return sbtStatusCache.get(cacheKey);
   }
@@ -769,11 +996,11 @@ export const checkSBTStatus = async (address) => {
   try {
     const contract = await getSBTContract();
     const status = await contract.getApplicationStatus(address);
-    
+
     // Cache for 30 seconds
     sbtStatusCache.set(cacheKey, status);
     setTimeout(() => sbtStatusCache.delete(cacheKey), 30000);
-    
+
     return status;
   } catch (error) {
     console.error("Error checking SBT status:", error);

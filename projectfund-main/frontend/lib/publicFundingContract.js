@@ -858,6 +858,9 @@ const publicFundingContractABI = [
 
 const contractAddress = process.env.NEXT_PUBLIC_FUND_MANAGEMENT_CONTRACT;
 
+// Admin address configuration
+const ADMIN_ADDRESS = '0x46F27CE202dFEa1d7eD6Cc9EA9d4f586352a8e31';
+
 export const getPublicFundingContract = async () => {
   if (typeof window.ethereum === "undefined") {
     throw new Error("Please install MetaMask!");
