@@ -79,30 +79,52 @@ export function AdminPanel({ showNotification, onError }: AdminPanelProps) {
     try {
       setProcessingApproval(applicantAddress);
       
-      // Use Django API to approve application
-      const response = await fetch('http://localhost:8000/api/admin/panel/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'approve_sbt',
-          applicant_address: applicantAddress,
-          nullifier: 1, // Default nullifier value
-          // Admin address would ideally come from wallet context
-          admin_address: applicantAddress // This should be replaced with actual admin address
-        })
-      });
+      // Call smart contract directly via MetaMask
+      const sbtContract = await getSBTContract();
       
-      const data = await response.json();
-      
-      if (data.success) {
-        showNotification(`Successfully approved application for ${applicantAddress}`);
-        // Refresh the applications list
-        fetchPendingApplications();
-      } else {
-        throw new Error(data.error || 'Failed to approve application');
+      if (!sbtContract) {
+        throw new Error("Failed to connect to SBT contract");
       }
+      
+      // Generate a random nullifier
+      const nullifier = Math.floor(Math.random() * 1000000);
+      
+      console.log(`Approving application for ${applicantAddress} with nullifier ${nullifier}`);
+      
+      // Call approveApplication function
+      const tx = await sbtContract.approveApplication(applicantAddress, nullifier);
+      console.log(`Transaction sent: ${tx.hash}`);
+      
+      // Wait for confirmation
+      const receipt = await tx.wait();
+      console.log(`Transaction confirmed on block ${receipt.blockNumber}`);
+      
+      // Also update backend database
+      try {
+        const dbResponse = await fetch('http://localhost:8000/api/admin/panel/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'approve_sbt',
+            applicant_address: applicantAddress,
+            nullifier: nullifier,
+            admin_address: applicantAddress
+          })
+        });
+        
+        const dbData = await dbResponse.json();
+        console.log("Backend response:", dbData);
+      } catch (dbErr) {
+        console.warn("Warning: Could not update backend database:", dbErr);
+      }
+      
+      showNotification(`✅ Successfully approved SBT for ${applicantAddress}`);
+      
+      // Refresh the applications list
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for blockchain confirmation
+      fetchPendingApplications();
     } catch (err) {
       console.error("Error approving application:", err);
       onError("Failed to approve application. " + (err as Error).message);

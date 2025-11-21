@@ -31,6 +31,8 @@ export function ProposalsList({ proposals, isAdmin, showNotification, onError }:
       await tx.wait();
 
       showNotification(`Stage funds released for proposal #${proposalId}`);
+      // Refresh proposals to update state
+      window.location.reload();
     } catch (err) {
       console.error("Error releasing stage amount:", err);
       onError("Failed to release funds. " + (err as Error).message);

@@ -13,7 +13,7 @@ async function main() {
   console.log("📍 Contract address:", contractAddress);
   
   // The address you want to add as authority (your MetaMask wallet)
-  const authorityAddress = "0x331681aaaaeb6b6f7724a64f6cb9eabe11a72ec9"; // New authority address
+  const authorityAddress = "0x6459c8db925694d0b376980239ff00a2eeeba311"; // New authority address
   console.log("➕ Adding authority:", authorityAddress);
   
   // Get contract instance

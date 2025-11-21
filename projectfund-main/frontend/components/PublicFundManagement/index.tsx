@@ -102,7 +102,7 @@ export function PublicFundManagement() {
       {activeTab === 'authority' && isAuthority && <AuthorityPanel showNotification={showNotification} onError={setError} />}
       {activeTab === 'proposals' && <ProposalsList proposals={proposals} isAdmin={isAdmin} showNotification={showNotification} onError={setError} />}
       {activeTab === 'voting' && <PublicVoting proposals={proposals.filter(p => p.state === 'PublicVoting')} showNotification={showNotification} onError={setError} />}
-      {activeTab === 'reports' && <StageReports proposals={proposals.filter(p => p.state === 'InProgress')} isAuthority={isAuthority} showNotification={showNotification} onError={setError} />}
+      {activeTab === 'reports' && isAuthority && <StageReports proposals={proposals.filter(p => p.state === 'InProgress')} isAuthority={isAuthority} showNotification={showNotification} onError={setError} />}
     </div>
   );
 }

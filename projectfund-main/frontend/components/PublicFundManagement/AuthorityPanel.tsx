@@ -89,8 +89,15 @@ export function AuthorityPanel({ showNotification, onError }: AuthorityPanelProp
         throw new Error("Please fill all required fields");
       }
 
-      if (!ethers.isAddress(proposalRecipient)) {
-        throw new Error("Invalid recipient address");
+      // Trim and validate recipient address
+      const trimmedRecipient = proposalRecipient.trim();
+      
+      if (!trimmedRecipient) {
+        throw new Error("Recipient address cannot be empty");
+      }
+
+      if (!ethers.isAddress(trimmedRecipient)) {
+        throw new Error(`Invalid recipient address format. Expected format: 0x... (received: ${trimmedRecipient.substring(0, 20)}...)`);
       }
 
       const filteredStageAmounts = stageAmounts
@@ -101,6 +108,14 @@ export function AuthorityPanel({ showNotification, onError }: AuthorityPanelProp
         throw new Error("At least one stage amount is required");
       }
 
+      // Validate each stage amount
+      for (let i = 0; i < filteredStageAmounts.length; i++) {
+        const amount = parseFloat(filteredStageAmounts[i]);
+        if (isNaN(amount) || amount <= 0) {
+          throw new Error(`Stage ${i + 1} amount must be a positive number`);
+        }
+      }
+
       const totalAmount = ethers.parseEther(proposalTotalAmount);
       const stageAmountsInWei = filteredStageAmounts.map(amount =>
         ethers.parseEther(amount)
@@ -109,13 +124,13 @@ export function AuthorityPanel({ showNotification, onError }: AuthorityPanelProp
       const contract = await getPublicFundingContract();
       const tx = await contract.createProposal(
         proposalDescription,
-        proposalRecipient,
+        trimmedRecipient,  // Use trimmed recipient
         totalAmount,
         stageAmountsInWei
       );
       await tx.wait();
 
-      showNotification("Proposal created successfully!");
+      showNotification("✅ Proposal created successfully!");
 
       setProposalDescription('');
       setProposalRecipient('');
@@ -127,7 +142,8 @@ export function AuthorityPanel({ showNotification, onError }: AuthorityPanelProp
       fetchProposals();
     } catch (err) {
       console.error("Error creating proposal:", err);
-      onError("Failed to create proposal. " + (err as Error).message);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      onError("Failed to create proposal. " + errorMsg);
     }
   };
   
@@ -168,13 +184,30 @@ export function AuthorityPanel({ showNotification, onError }: AuthorityPanelProp
 
           <div>
             <label className="block text-gray-700 mb-2">Recipient Address</label>
-            <input
-              type="text"
-              value={proposalRecipient}
-              onChange={(e) => setProposalRecipient(e.target.value)}
-              className="w-full p-2 border rounded"
-              placeholder="0x..."
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={proposalRecipient}
+                onChange={(e) => setProposalRecipient(e.target.value)}
+                className={`flex-1 p-2 border rounded ${
+                  proposalRecipient && !ethers.isAddress(proposalRecipient.trim())
+                    ? 'border-red-500 bg-red-50'
+                    : proposalRecipient && ethers.isAddress(proposalRecipient.trim())
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-gray-300'
+                }`}
+                placeholder="0x..."
+              />
+              {proposalRecipient && ethers.isAddress(proposalRecipient.trim()) && (
+                <span className="text-green-600 flex items-center">✓</span>
+              )}
+              {proposalRecipient && !ethers.isAddress(proposalRecipient.trim()) && (
+                <span className="text-red-600 flex items-center">✗</span>
+              )}
+            </div>
+            {proposalRecipient && !ethers.isAddress(proposalRecipient.trim()) && (
+              <p className="text-red-500 text-sm mt-1">Invalid Ethereum address format (should start with 0x...)</p>
+            )}
           </div>
 
           <div>

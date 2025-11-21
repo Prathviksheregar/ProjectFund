@@ -50,7 +50,7 @@ export function TabNavigation({ activeTab, setActiveTab, isAdmin, isAuthority, p
             Public Voting
           </button>
         )}
-        {proposals.some(p => p.state === 'InProgress') && (
+        {isAuthority && proposals.some(p => p.state === 'InProgress') && (
           <button
             onClick={() => setActiveTab('reports')}
             className={`mr-2 py-2 px-4 ${activeTab === 'reports' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-800'}`}

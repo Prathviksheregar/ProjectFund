@@ -36,6 +36,13 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
     };
     
     loadAllStageInfo();
+    
+    // Auto-refresh stage info every 3 seconds to catch state changes
+    const refreshInterval = setInterval(() => {
+      loadAllStageInfo();
+    }, 3000);
+    
+    return () => clearInterval(refreshInterval);
   }, [proposals]); 
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -196,13 +203,51 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
   const voteOnStage = async (proposalId: number, stageNumber: number, approve: boolean) => {
     try {
       const contract = await getPublicFundingContract();
+      
+      // Check if user has already voted
+      const stageInfo = stageInfoMap[`${proposalId}-${stageNumber}`];
+      if (!stageInfo) {
+        throw new Error("Stage info not loaded. Please refresh and try again.");
+      }
+      
+      // Validate stage state
+      if (stageInfo.state !== 'InProgress') {
+        throw new Error(`Cannot vote on stage in ${stageInfo.state} state. Only InProgress stages can be voted on.`);
+      }
+      
+      showNotification(`Submitting ${approve ? 'approval' : 'rejection'} vote...`);
+      
       const tx = await contract.voteOnStage(proposalId, stageNumber, approve);
-      await tx.wait();
+      const receipt = await tx.wait();
+      
+      if (!receipt) {
+        throw new Error("Transaction failed - no receipt received");
+      }
 
-      showNotification(`Vote recorded for proposal #${proposalId} stage #${stageNumber}`);
+      showNotification(`✓ Vote ${approve ? 'approved' : 'recorded'} for proposal #${proposalId} stage #${stageNumber}`);
+      
+      // Add longer delay for blockchain to update and state change to reflect
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Force refresh stage info multiple times to ensure we get updated state
+      await getStageInfo(proposalId, stageNumber);
+      
+      // Double-check after a brief delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await getStageInfo(proposalId, stageNumber);
+      
     } catch (err) {
       console.error("Error voting on stage:", err);
-      onError("Failed to vote on stage. " + (err as Error).message);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      // Better error messages
+      if (errorMessage.includes("hasVoted")) {
+        onError("You have already voted on this stage.");
+      } else if (errorMessage.includes("not in progress")) {
+        onError("This stage is no longer available for voting.");
+      } else {
+        onError("Failed to vote on stage. " + errorMessage);
+      }
     }
   };
 
@@ -470,18 +515,23 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
                     <p className="text-gray-600">Stage Report</p>
                     {stageInfo.report ? (
                       <div className="p-3 bg-gray-50 rounded border">
-                        <p className="mb-2">Report uploaded to IPFS</p>
-                        <a 
-                          href={`https://gateway.pinata.cloud/ipfs/${stageInfo.report}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-500 underline flex items-center"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          View PDF Report
-                        </a>
+                        {stageInfo.state === 'Completed' ? (
+                          <div className="flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
+                            </svg>
+                            <span className="text-green-600 font-semibold">Approved</span>
+                          </div>
+                        ) : stageInfo.state === 'InProgress' ? (
+                          <div className="flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-500 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                            </svg>
+                            <span className="text-yellow-600 font-semibold">Under Process ({stageInfo.voteCount})</span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-600">Pending Review</span>
+                        )}
                       </div>
                     ) : (
                       <p className="p-3 bg-gray-50 rounded border">No report submitted yet</p>
@@ -492,20 +542,32 @@ export function StageReports({ proposals, isAuthority, showNotification, onError
                 <p className="text-gray-600 mb-4">Loading stage details...</p>
               )}
 
-              {isAuthority && (
-                <div className="flex gap-2">
+              {isAuthority && stageInfo && stageInfo.report && stageInfo.state === 'InProgress' && (
+                <div className="flex gap-2 mt-4">
                   <button
                     onClick={() => voteOnStage(proposal.id, proposal.currentStage - 1, true)}
-                    className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                    className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:bg-gray-400"
                   >
-                    Approve Stage
+                    ✓ Approve Stage
                   </button>
                   <button
                     onClick={() => voteOnStage(proposal.id, proposal.currentStage - 1, false)}
-                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:bg-gray-400"
                   >
-                    Reject Stage
+                    ✗ Reject Stage
                   </button>
+                </div>
+              )}
+              
+              {isAuthority && stageInfo && !stageInfo.report && (
+                <p className="text-gray-600 italic mt-4">Awaiting stage report submission before voting...</p>
+              )}
+              
+              {isAuthority && stageInfo && stageInfo.report && stageInfo.state !== 'InProgress' && (
+                <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                  <p className="text-blue-700 text-sm">
+                    {stageInfo.state === 'Completed' ? '✓ Stage has been approved and completed.' : 'Voting is no longer available for this stage.'}
+                  </p>
                 </div>
               )}
             </div>
